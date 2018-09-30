@@ -7,7 +7,7 @@ import (
 	"log"
 	"strings"
 
-	. "binchen.com/golang_bench/dgraph/common"
+	"binchen.com/golang_bench/dgraph/db/model"
 	"binchen.com/golang_bench/dgraph/node"
 	"github.com/dgraph-io/dgo"
 	"github.com/dgraph-io/dgo/protos/api"
@@ -31,18 +31,9 @@ type VisibleIGoals struct {
 }
 
 type OrgNodes struct {
-	Depts []struct {
-		UID     string `json:"uid"`
-		DeptXID string `json:"dept_xid"`
-	} `json:"depts"`
-	Duties []struct {
-		UID     string `json:"uid"`
-		DutyXID string `json:"duty_xid"`
-	} `json:"duties"`
-	Users []struct {
-		UID     string `json:"uid"`
-		UserXID string `json:"user_xid"`
-	} `json:"users"`
+	Depts  []*node.Dept `json:"depts"`
+	Duties []*node.Duty `json:"duties"`
+	Users  []*node.User `json:"users"`
 }
 
 // IGoalDB is defines APIs for igoal node.
@@ -161,7 +152,7 @@ func (db *IGoalDBImpl) GetVisibleIGoals(deptIDs []string, dutyIDs []string, user
 }
 
 // InsertIGoal inserts a igoal to graph db.
-func (db *IGoalDBImpl) InsertIGoal(manager *node.Manager, participator *node.Participator, creatorID string, igoal node.ParentNode) error {
+func (db *IGoalDBImpl) InsertIGoal(manager *model.Manager, participator *model.Participator, creatorID string, igoal interface{}) error {
 	conn, err := grpc.Dial(db.connectionStr, grpc.WithInsecure())
 	if err != nil {
 		log.Fatal("While trying to dial dgraph gRPC")
@@ -188,7 +179,11 @@ func (db *IGoalDBImpl) InsertIGoal(manager *node.Manager, participator *node.Par
 		log.Fatal(err)
 		return err
 	}
-	igoalUID := assigned.Uids["blank-0"]
+
+	val, ok := igoal.(*node.IGoal)
+	if ok {
+		val.UID = assigned.Uids["blank-0"]
+	}
 
 	orgRoot, err := queryOrgNodesByXIDs(ctx, txn, manager, participator, creatorID)
 	if err != nil {
@@ -198,22 +193,22 @@ func (db *IGoalDBImpl) InsertIGoal(manager *node.Manager, participator *node.Par
 	depts := orgRoot.Depts
 	duties := orgRoot.Duties
 	users := orgRoot.Users
-	var queryDeptsMap = make(map[string]string)
-	var queryDutiesMap = make(map[string]string)
-	var queryUsersMap = make(map[string]string)
+	var queryDeptsMap = make(map[string]*node.Dept)
+	var queryDutiesMap = make(map[string]*node.Duty)
+	var queryUsersMap = make(map[string]*node.User)
 	if len(depts) > 0 {
 		for _, dept := range depts {
-			queryDeptsMap[dept.DeptXID] = dept.UID
+			queryDeptsMap[dept.DeptXID] = dept
 		}
 	}
 	if len(duties) > 0 {
 		for _, duty := range duties {
-			queryDutiesMap[duty.DutyXID] = duty.UID
+			queryDutiesMap[duty.DutyXID] = duty
 		}
 	}
 	if len(users) > 0 {
 		for _, user := range users {
-			queryUsersMap[user.UserXID] = user.UID
+			queryUsersMap[user.UserXID] = user
 		}
 	}
 
@@ -225,96 +220,113 @@ func (db *IGoalDBImpl) InsertIGoal(manager *node.Manager, participator *node.Par
 	queryUsersMap, err = InsertUserNodes(ctx, txn, manager, participator, creatorID, queryUsersMap)
 	checkAndReturnErr(err)
 
-	var set = []*api.NQuad{&api.NQuad{
-		Subject:   queryUsersMap[creatorID],
-		Predicate: OwnerPredicate,
-		ObjectId:  igoalUID,
-	}}
+	var deptSet = []*model.Dept{}
+	var dutySet = []*model.Duty{}
+	var userSet = []*model.User{}
 	for _, deptXID := range manager.DeptIDs {
 		if _, ok := queryDeptsMap[deptXID]; ok {
-			set = append(set, &api.NQuad{
-				Subject:   queryDeptsMap[deptXID],
-				Predicate: ManagerPredicate,
-				ObjectId:  igoalUID,
+			deptSet = append(deptSet, &model.Dept{
+				Dept:    queryDeptsMap[deptXID],
+				Manager: &igoal,
 			})
 		}
 	}
 	for _, deptXID := range participator.DeptIDs {
 		if _, ok := queryDeptsMap[deptXID]; ok {
-			set = append(set, &api.NQuad{
-				Subject:   queryDeptsMap[deptXID],
-				Predicate: ParticipatorPredicate,
-				ObjectId:  igoalUID,
+			deptSet = append(deptSet, &model.Dept{
+				Dept:         queryDeptsMap[deptXID],
+				Participator: &igoal,
 			})
 		}
 	}
+	mu = &api.Mutation{}
+	deptsPb, err := json.Marshal(deptSet)
+	mu.SetJson = deptsPb
+	_, err = txn.Mutate(ctx, mu)
+	checkAndReturnErr(err)
+
 	for _, dutyXID := range manager.DutyIDs {
 		if _, ok := queryDutiesMap[dutyXID]; ok {
-			set = append(set, &api.NQuad{
-				Subject:   queryDutiesMap[dutyXID],
-				Predicate: ManagerPredicate,
-				ObjectId:  igoalUID,
+			dutySet = append(dutySet, &model.Duty{
+				Duty:    queryDutiesMap[dutyXID],
+				Manager: &igoal,
 			})
 		}
 	}
 	for _, dutyXID := range participator.DutyIDs {
 		if _, ok := queryDutiesMap[dutyXID]; ok {
-			set = append(set, &api.NQuad{
-				Subject:   queryDutiesMap[dutyXID],
-				Predicate: ParticipatorPredicate,
-				ObjectId:  igoalUID,
+			dutySet = append(dutySet, &model.Duty{
+				Duty:         queryDutiesMap[dutyXID],
+				Participator: &igoal,
 			})
 		}
 	}
+	mu = &api.Mutation{}
+	dutiesPb, err := json.Marshal(dutySet)
+	mu.SetJson = dutiesPb
+	_, err = txn.Mutate(ctx, mu)
+	checkAndReturnErr(err)
+
 	for _, userXID := range manager.UserIDs {
 		if _, ok := queryUsersMap[userXID]; ok {
-			set = append(set, &api.NQuad{
-				Subject:   queryUsersMap[userXID],
-				Predicate: ManagerPredicate,
-				ObjectId:  igoalUID,
+			userSet = append(userSet, &model.User{
+				User:    queryUsersMap[userXID],
+				Manager: &igoal,
 			})
 		}
 	}
 	for _, userXID := range participator.UserIDs {
 		if _, ok := queryUsersMap[userXID]; ok {
-			set = append(set, &api.NQuad{
-				Subject:   queryUsersMap[userXID],
-				Predicate: ParticipatorPredicate,
-				ObjectId:  igoalUID,
+			userSet = append(userSet, &model.User{
+				User:         queryUsersMap[userXID],
+				Participator: &igoal,
 			})
 		}
 	}
-
 	mu = &api.Mutation{}
-	mu.Set = set
-	assigned, err = txn.Mutate(ctx, mu)
+	usersPb, err := json.Marshal(userSet)
+	checkAndReturnErr(err)
+	mu.SetJson = usersPb
+	_, err = txn.Mutate(ctx, mu)
+	checkAndReturnErr(err)
+
+	owner := &model.Owner{
+		User:  queryUsersMap[creatorID],
+		Owner: &igoal,
+	}
+	mu = &api.Mutation{}
+	ownerPb, err := json.Marshal(owner)
+	checkAndReturnErr(err)
+	mu.SetJson = ownerPb
+	_, err = txn.Mutate(ctx, mu)
 	checkAndReturnErr(err)
 
 	txn.Commit(ctx)
-
 	return nil
 }
 
 // InsertDeptNodes inserts department nodes that does not exist.
-func InsertDeptNodes(ctx context.Context, txn *dgo.Txn, manager *node.Manager, participator *node.Participator, nodeXIDAndUIDMap map[string]string) (map[string]string, error) {
-	var deptNodes = []node.Dept{}
+func InsertDeptNodes(ctx context.Context, txn *dgo.Txn, manager *model.Manager, participator *model.Participator, nodeXIDAndUIDMap map[string]*node.Dept) (map[string]*node.Dept, error) {
+	var deptNodes = []*node.Dept{}
 	if len(manager.DeptIDs) > 0 {
 		for _, deptXID := range manager.DeptIDs {
 			if _, ok := nodeXIDAndUIDMap[deptXID]; !ok {
-				deptNodes = append(deptNodes, node.Dept{
+				dept := &node.Dept{
 					DeptXID: deptXID,
-				})
-				nodeXIDAndUIDMap[deptXID] = ""
+				}
+				deptNodes = append(deptNodes, dept)
+				nodeXIDAndUIDMap[deptXID] = dept
 			}
 		}
 	}
 	if len(participator.DeptIDs) > 0 {
 		for _, deptXID := range participator.DeptIDs {
 			if _, ok := nodeXIDAndUIDMap[deptXID]; !ok {
-				deptNodes = append(deptNodes, node.Dept{
+				dept := &node.Dept{
 					DeptXID: deptXID,
-				})
-				nodeXIDAndUIDMap[deptXID] = ""
+				}
+				deptNodes = append(deptNodes, dept)
+				nodeXIDAndUIDMap[deptXID] = dept
 			}
 		}
 	}
@@ -332,7 +344,7 @@ func InsertDeptNodes(ctx context.Context, txn *dgo.Txn, manager *node.Manager, p
 			return nodeXIDAndUIDMap, err
 		}
 		for i := 0; i < len(deptNodes); i++ {
-			nodeXIDAndUIDMap[deptNodes[i].DeptXID] = assigned.Uids[fmt.Sprintf("blank-%d", i)]
+			nodeXIDAndUIDMap[deptNodes[i].DeptXID].UID = assigned.Uids[fmt.Sprintf("blank-%d", i)]
 		}
 	}
 
@@ -340,25 +352,27 @@ func InsertDeptNodes(ctx context.Context, txn *dgo.Txn, manager *node.Manager, p
 }
 
 // InsertDutyNodes inserts duty nodes that does not exist.
-func InsertDutyNodes(ctx context.Context, txn *dgo.Txn, manager *node.Manager, participator *node.Participator, nodeXIDAndUIDMap map[string]string) (map[string]string, error) {
-	var dutyNodes = []node.Duty{}
+func InsertDutyNodes(ctx context.Context, txn *dgo.Txn, manager *model.Manager, participator *model.Participator, nodeXIDAndUIDMap map[string]*node.Duty) (map[string]*node.Duty, error) {
+	var dutyNodes = []*node.Duty{}
 	if len(manager.DutyIDs) > 0 {
 		for _, dutyXID := range manager.DutyIDs {
 			if _, ok := nodeXIDAndUIDMap[dutyXID]; !ok {
-				dutyNodes = append(dutyNodes, node.Duty{
+				duty := &node.Duty{
 					DutyXID: dutyXID,
-				})
-				nodeXIDAndUIDMap[dutyXID] = ""
+				}
+				dutyNodes = append(dutyNodes, duty)
+				nodeXIDAndUIDMap[dutyXID] = duty
 			}
 		}
 	}
 	if len(participator.DutyIDs) > 0 {
 		for _, dutyXID := range participator.DutyIDs {
 			if _, ok := nodeXIDAndUIDMap[dutyXID]; !ok {
-				dutyNodes = append(dutyNodes, node.Duty{
+				duty := &node.Duty{
 					DutyXID: dutyXID,
-				})
-				nodeXIDAndUIDMap[dutyXID] = ""
+				}
+				dutyNodes = append(dutyNodes, duty)
+				nodeXIDAndUIDMap[dutyXID] = duty
 			}
 		}
 	}
@@ -376,7 +390,7 @@ func InsertDutyNodes(ctx context.Context, txn *dgo.Txn, manager *node.Manager, p
 			return nodeXIDAndUIDMap, err
 		}
 		for i := 0; i < len(dutyNodes); i++ {
-			nodeXIDAndUIDMap[dutyNodes[i].DutyXID] = assigned.Uids[fmt.Sprintf("blank-%d", i)]
+			nodeXIDAndUIDMap[dutyNodes[i].DutyXID].UID = assigned.Uids[fmt.Sprintf("blank-%d", i)]
 		}
 	}
 
@@ -384,32 +398,36 @@ func InsertDutyNodes(ctx context.Context, txn *dgo.Txn, manager *node.Manager, p
 }
 
 // InsertUserNodes inserts user nodes that does not exist.
-func InsertUserNodes(ctx context.Context, txn *dgo.Txn, manager *node.Manager, participator *node.Participator, creatorID string, nodeXIDAndUIDMap map[string]string) (map[string]string, error) {
-	var userNodes = []node.User{}
+func InsertUserNodes(ctx context.Context, txn *dgo.Txn, manager *model.Manager, participator *model.Participator, creatorID string, nodeXIDAndUIDMap map[string]*node.User) (map[string]*node.User, error) {
+	var userNodes = []*node.User{}
 	if len(manager.UserIDs) > 0 {
 		for _, userXID := range manager.UserIDs {
 			if _, ok := nodeXIDAndUIDMap[userXID]; !ok {
-				userNodes = append(userNodes, node.User{
+				user := &node.User{
 					UserXID: userXID,
-				})
-				nodeXIDAndUIDMap[userXID] = ""
+				}
+				userNodes = append(userNodes, user)
+				nodeXIDAndUIDMap[userXID] = user
 			}
 		}
 	}
 	if len(participator.UserIDs) > 0 {
 		for _, userXID := range participator.UserIDs {
 			if _, ok := nodeXIDAndUIDMap[userXID]; !ok {
-				userNodes = append(userNodes, node.User{
+				user := &node.User{
 					UserXID: userXID,
-				})
-				nodeXIDAndUIDMap[userXID] = ""
+				}
+				userNodes = append(userNodes, user)
+				nodeXIDAndUIDMap[userXID] = user
 			}
 		}
 	}
 	if _, ok := nodeXIDAndUIDMap[creatorID]; !ok {
-		userNodes = append(userNodes, node.User{
+		user := &node.User{
 			UserXID: creatorID,
-		})
+		}
+		userNodes = append(userNodes, user)
+		nodeXIDAndUIDMap[creatorID] = user
 	}
 
 	if len(userNodes) > 0 {
@@ -426,14 +444,14 @@ func InsertUserNodes(ctx context.Context, txn *dgo.Txn, manager *node.Manager, p
 			return nodeXIDAndUIDMap, err
 		}
 		for i := 0; i < len(userNodes); i++ {
-			nodeXIDAndUIDMap[userNodes[i].UserXID] = assigned.Uids[fmt.Sprintf("blank-%d", i)]
+			nodeXIDAndUIDMap[userNodes[i].UserXID].UID = assigned.Uids[fmt.Sprintf("blank-%d", i)]
 		}
 	}
 
 	return nodeXIDAndUIDMap, nil
 }
 
-func queryOrgNodesByXIDs(ctx context.Context, txn *dgo.Txn, manager *node.Manager, participator *node.Participator, creatorID string) (*OrgNodes, error) {
+func queryOrgNodesByXIDs(ctx context.Context, txn *dgo.Txn, manager *model.Manager, participator *model.Participator, creatorID string) (*OrgNodes, error) {
 	var deptXIDs, dutyXIDs, userXIDs = "", "", ""
 
 	// 负责人

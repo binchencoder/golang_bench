@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"binchen.com/golang_bench/dgraph/db/model"
 	"binchen.com/golang_bench/dgraph/node"
 
 	. "binchen.com/golang_bench/dgraph/common"
@@ -29,12 +30,12 @@ func TestInsertIGoal(t *testing.T) {
 	dutyIDs := []string{"105", "106", "107"}
 	userIDs := []string{"206", "207"}
 
-	manager := &node.Manager{
+	manager := &model.Manager{
 		DeptIDs: deptIDs,
 		DutyIDs: dutyIDs,
 		UserIDs: userIDs,
 	}
-	participator := &node.Participator{
+	participator := &model.Participator{
 		DeptIDs: deptIDs,
 		DutyIDs: dutyIDs,
 		UserIDs: userIDs,

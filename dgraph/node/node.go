@@ -18,19 +18,8 @@ type User struct {
 	UserXID string `json:"user_xid"`
 }
 
-// Tag for graph tag node.
-type Tag struct {
-	UID       string `json:"uid,omitempty"`
-	TagXID    string `json:"tag_xid"`
-	Name      string `json:"name"`
-	CreatedAt int64  `json:"created_at"`
-}
-
-type ParentNode interface{}
-
 // IGoal for grapth igoal node.
 type IGoal struct {
-	ParentNode
 	UID       string `json:"uid,omitempty"`
 	IgoalXID  string `json:"igoal_xid"`
 	Name      string `json:"name"`
@@ -41,7 +30,6 @@ type IGoal struct {
 
 // Frame for grapth frame node.
 type Frame struct {
-	ParentNode
 	UID      string `json:"uid,omitempty"`
 	FrameXID string `json:"frame_xid"`
 	Name     string `json:"name"`
@@ -54,14 +42,10 @@ type Item struct {
 	Name    string `json:"name"`
 }
 
-type Manager struct {
-	DeptIDs []string
-	DutyIDs []string
-	UserIDs []string
-}
-
-type Participator struct {
-	DeptIDs []string
-	DutyIDs []string
-	UserIDs []string
+// Tag for graph tag node.
+type Tag struct {
+	UID       string `json:"uid,omitempty"`
+	TagXID    string `json:"tag_xid"`
+	Name      string `json:"name"`
+	CreatedAt int64  `json:"created_at"`
 }
