@@ -1,0 +1,17 @@
+# Scheme
+dept_xid: string @index(term) .
+duty_xid: string @index(term) .
+user_xid: string @index(term) .
+igoal_xid: string @index(exact) .
+frame_xid: string @index(exact) .
+item_xid: string @index(exact) .
+name: string @index(fulltext) .
+participator: uid @reverse @count .
+manager: uid @reverse @count .
+owner: uid @reverse @count .
+parent: uid @reverse @count .
+updated_at: int @index(int) .
+created_at: int @index(int) .
+tag_xid: string @index(exact) .
+tag_of: uid @reverse @count .
+state: int @index(int) .
