@@ -14,9 +14,9 @@ import (
 func TestGetVisibleIGoals(t *testing.T) {
 	igoalDBImpl := NewIGoalDBImpl(DgraphServerPoint)
 
-	deptIDs := []string{"1", "2"}
-	dutyIDs := []string{""}
-	userIDs := []string{"205"}
+	deptIDs := []string{" "}
+	dutyIDs := []string{" "}
+	userIDs := []string{"179"}
 	igoals, err := igoalDBImpl.GetVisibleIGoals(deptIDs, dutyIDs, userIDs)
 	if err != nil {
 		fmt.Println(igoals)
